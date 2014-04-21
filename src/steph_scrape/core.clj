@@ -7,6 +7,7 @@
 
 (defn test-run []
   (info "Beginning Test Run") 
-  (future (let [store (init-db "steph-scrape-top40")]
+  (let [store (init-db "steph-scrape-top40")]
     (preload-db store csv-path)
-    (update-all-records store))))
+    (info "Preloaded DB with URLs")
+    (future (retrieve-unfetched-records store))))

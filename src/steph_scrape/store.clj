@@ -3,6 +3,7 @@
   (:require [com.ashafa.clutch :as c]
             [clojure-csv.core :as csv]
             [boilerpipe-clj.core :refer [get-text]]
+            [com.climate.claypoole :as cp]
             [steph-scrape.fetch :refer [fetch-record]]
             [steph-scrape.export :refer [lazy-read-csv]]))
 
@@ -23,7 +24,7 @@
   {:_id (str "_design/" doc-name) :language :javascript :views (into {} views)})
 
 (defn init-record [row]
-  (-> (zipmap [:sid :url] row) (merge record-defaults) (update-in [:sid] #(Integer/parseInt %))))
+  (-> (zipmap [:sid :url :timestamp] row) (merge record-defaults) (update-in [:sid] #(Integer/parseInt %))))
 
 (defn get-views [] 
   (let [views (map #(.toString %) (filter #(.. % (toString) (endsWith ".js")) 
@@ -45,35 +46,39 @@
 (defn preload-db 
   ([db csv-path] (preload-db db csv-path 1000))
   ([db csv-path batch-size]
-   (loop [lst (lazy-read-csv csv-path)]
+   (let [cnt (atom 0)] 
+     (loop [lst (lazy-read-csv csv-path)]
        (if (seq lst)
          (let [[batch rest] (split-at batch-size lst)]
            (do 
              (c/bulk-update db (doall (map init-record batch)))
+             (-> (swap! cnt (partial + 1000)) (info "records preloaded from CSV thus far"))
              (recur rest)))
-         true))))
+         true)))))
 
 ;; Fetch and Update
-(defn update-record-from-web [rec] 
-  (let 
-    [res @(fetch-record rec) 
-     rec-update (merge rec
-                       {:raw-html (:body res)
-                        :parsed-text (get-text (if-let [txt (:body res)] txt ""))
-                        :last-fetched-at (java.util.Date.)
-                        :last-fetched-resp (:status res)})]
+(defn update-rec-from-web [rec] 
+  (let [res (fetch-record rec) 
+        rec-update (merge rec
+                          {:raw-html (:body res)
+                           :last-fetched-at (java.util.Date.)
+                           :last-fetched-resp (:status res)})]
     (merge rec-update {:fetched true})))
 
-(def db (c/get-database "steph-scrape-top40"))
+(defn update-extracted-text [rec]
+  (merge rec {:parsed-text 
+              (get-text 
+                (if-let [txt (:raw-html rec)] 
+                  txt 
+                  ""))}))
 
-(defn update-all-records [db]
+(defn retrieve-unfetched-records [db]
   (let [unfetched (c/get-view db "filtered" "unfetched")
+        net-pool (cp/threadpool 100)
         cnt (atom 0)]
+    (info "Fetching and updating records from:" cnt)
     (doseq [recs (partition-all 25 unfetched)]
         (do
-          (info @cnt (first recs))
-          (c/bulk-update db 
-                       (doall (pmap #(update-record-from-web (:value %)) recs)))
-          (swap! cnt inc)
-          )))
+          (c/bulk-update db (doall (cp/upmap net-pool #(update-rec-from-web (:value %)) recs)))
+          (-> (swap! cnt inc) (partial * 25) (info "records archived")))))
   (info "Finished Run"))
