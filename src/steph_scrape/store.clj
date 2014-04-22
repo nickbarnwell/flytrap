@@ -62,7 +62,9 @@
         rec-update (merge rec
                           {:raw-html (:body res)
                            :last-fetched-at (java.util.Date.)
-                           :last-fetched-resp (:status res)})]
+                           :last-fetched-resp (:status res)
+                           :fetch-payload res
+                           })]
     (merge rec-update {:fetched true})))
 
 (defn update-extracted-text [rec]
@@ -76,7 +78,7 @@
   (let [unfetched (c/get-view db "filtered" "unfetched")
         net-pool (cp/threadpool 100)
         cnt (atom 0)]
-    (info "Fetching and updating records from:" cnt)
+    (info "Fetching and updating records from:" @cnt)
     (doseq [recs (partition-all 25 unfetched)]
         (do
           (c/bulk-update db (doall (cp/upmap net-pool #(update-rec-from-web (:value %)) recs)))
