@@ -9,12 +9,8 @@
 
 ;; Constants
 (def record-defaults
-  {:fetched false 
-   :raw-html nil 
-   :parsed-text nil
-   :last-fetched-at nil
-   :last-fetched-resp nil
-   })
+  {:fetched nil 
+   :last-fetched-at nil})
 
 (defmacro swallow-exceptions [& body]
     `(try ~@body (catch Exception e#)))
@@ -37,6 +33,9 @@
 (defn create-views [db]
   (c/put-document db (view-records "filtered" (get-views))))
 
+(defn get-db [db-name]
+  (c/get-database db-name))
+
 (defn init-db [db-name]
   (do (c/delete-database db-name)
     (let [db (c/get-database db-name)] 
@@ -57,15 +56,6 @@
          true)))))
 
 ;; Fetch and Update
-(defn update-rec-from-web [rec] 
-  (let [res (fetch-record rec) 
-        rec-update (merge rec
-                          {:raw-html (:body res)
-                           :last-fetched-at (java.util.Date.)
-                           :last-fetched-resp (:status res)
-                           :fetch-payload res
-                           })]
-    (merge rec-update {:fetched true})))
 
 (defn update-extracted-text [rec]
   (merge rec {:parsed-text 
@@ -80,7 +70,9 @@
         cnt (atom 0)]
     (info "Fetching and updating records from:" @cnt)
     (doseq [recs (partition-all 25 unfetched)]
-        (do
-          (c/bulk-update db (doall (cp/upmap net-pool #(update-rec-from-web (:value %)) recs)))
-          (-> (swap! cnt inc) (partial * 25) (info "records archived")))))
+      (c/bulk-update db 
+                     (doall 
+                       (do
+                         (info "Processing head of new partition")
+                         (cp/upmap net-pool #(fetch-record (:value %)) recs))))))
   (info "Finished Run"))
