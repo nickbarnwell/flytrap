@@ -65,11 +65,12 @@
                   ""))}))
 
 (defn retrieve-unfetched-records [db]
-  (let [unfetched (c/get-view db "filtered" "unfetched")
-        net-pool (cp/threadpool 100)
+  (let [pool-size 100
+        unfetched (c/get-view db "filtered" "unfetched")
+        net-pool (cp/threadpool pool-size)
         cnt (atom 0)]
     (info "Fetching and updating records from:" @cnt)
-    (doseq [recs (partition-all 25 unfetched)]
+    (doseq [recs (partition-all pool-size unfetched)]
       (c/bulk-update db 
                      (doall 
                        (do

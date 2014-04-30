@@ -6,7 +6,7 @@
             [clojure.data.json :as json]))
 
 (def default-http-params 
-  {:timeout 5000  
+  {:timeout 10000  
    :max-redirects 3})
 
 (defn redirect-exception? [e]
@@ -17,12 +17,16 @@
 
 (defn host-for-url [url] (.. (URI. url) (getHost)))
 
-(defn fetcher [url opts params callback]
-  (let [params (merge default-http-params opts {:query-params params})]
+(defn fetcher [url opts q-params callback]
+  (let [params (merge default-http-params 
+                      opts 
+                      (if (seq? q-params)
+                        {:query-params q-params}
+                        nil))]
     (comment (debug "Fetching:" url  "Params:" params))
     (deref (http/get url 
-                       params 
-                       callback))))
+                     params 
+                     callback))))
 
 (defn resp-map [rec]
   (fn [res] 
@@ -71,7 +75,7 @@
            (resp-map rec))) 
 
 (defn special-cased-site? [rec]
-  (let [host (host-for-url (:url rec))
+  (let [host (host-for-url (or (:url rec) (:proxy-url rec)))
         cases {"feedproxy.google.com" 
                (fn [rec] 
                  (let [o-url (:url rec)
@@ -96,6 +100,6 @@
           fetched (not (contains? resp :error) )]
       (merge rec {:fetch-resp (dissoc resp :error) :fetched fetched})))
     (catch Exception e
-      (error "Exception" e "caught in fetch record")
+      (error "Exception" e "caught in fetch record", rec)
       (assoc rec :fetched false)))]
     ret))
